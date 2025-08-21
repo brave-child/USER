@@ -9,9 +9,9 @@ filter_out_cod_start_users: True
 inter_file_name: 'clothing.inter'
 
 n_layers: 1
-bm_temp: 0.2
-sc_loss: 0.1
 sc_temp: 0.2
+mp_loss: 0.1
+mp_temp: 0.2
 ia_loss: 0.01
 
 

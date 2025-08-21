@@ -9,9 +9,9 @@ filter_out_cod_start_users: True
 inter_file_name: 'baby.inter'
 
 n_layers: 2
-bm_temp: 0.4
-sc_loss: 0.01
-sc_temp: 0.1
+sc_temp: 0.4
+mp_loss: 0.01
+mp_temp: 0.1
 ia_loss: 0.1
 
 
