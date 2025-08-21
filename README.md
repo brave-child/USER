@@ -12,7 +12,7 @@ Download from Google Drive: [Baby/Sports/Clothing](https://drive.google.com/driv
   python src/main.py
   ```
 
-## Codebook and datests tokens
+## Codebook and Tokens
 Download from Google Drive: https://drive.google.com/drive/folders/1IXLbNNzyPMiuOUyZPzH1s-J-VAuULYBT?usp=drive_link
 
 Place the `tokens.json` file into the corresponding dataset folder (e.g., `data/baby`).
