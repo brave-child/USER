@@ -98,8 +98,8 @@ class USER(GeneralRecommender):
 
         self.fgpe = FGPEncoder(self.embedding_dim)
 
-        visual_tokens = torch.load("tokens/visual_codebook.pth")
-        textual_tokens = torch.load("tokens/textual_codebook.pth")
+        visual_tokens = torch.load("codebook/visual_codebook.pth")
+        textual_tokens = torch.load("codebook/textual_codebook.pth")
         self.visual_token_embedding = torch.nn.Embedding.from_pretrained(visual_tokens).requires_grad_(False).cuda()
         self.text_token_embedding = torch.nn.Embedding.from_pretrained(textual_tokens).requires_grad_(False).cuda()
         
