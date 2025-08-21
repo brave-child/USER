@@ -13,7 +13,7 @@ Download from Google Drive: [Baby/Sports/Clothing](https://drive.google.com/driv
   ```
 
 ## Codebook and Tokens
-Download from Google Drive: https://drive.google.com/drive/folders/1IXLbNNzyPMiuOUyZPzH1s-J-VAuULYBT?usp=drive_link
+Download from Google Drive: [Tokens and Codebook](https://drive.google.com/drive/folders/1IXLbNNzyPMiuOUyZPzH1s-J-VAuULYBT?usp=drive_link)
 
 Place the `tokens.json` file into the corresponding dataset folder (e.g., `data/baby`).
 Place the `codebook.pth` file into the `codebook` directory.
