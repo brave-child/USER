@@ -32,15 +32,15 @@ class USER(GeneralRecommender):
         # load dataset info
         self.interaction_matrix = dataset.inter_matrix(form='coo').astype(np.float32)
         self.user_embedding = nn.Embedding(self.n_users, self.embedding_dim)
-        self.item_id_embedding = nn.Embedding(self.n_items, self.embedding_dim)
+        self.raw_item_embedding = nn.Embedding(self.n_items, self.embedding_dim)
         nn.init.xavier_uniform_(self.user_embedding.weight)
-        nn.init.xavier_uniform_(self.item_id_embedding.weight)
+        nn.init.xavier_uniform_(self.raw_item_embedding.weight)
         
-        self.extended_image_user = nn.Embedding(self.n_users, self.embedding_dim)
-        nn.init.xavier_uniform_(self.extended_image_user.weight)
+        self.latent_v_user = nn.Embedding(self.n_users, self.embedding_dim)
+        nn.init.xavier_uniform_(self.latent_v_user.weight)
         
-        self.extended_text_user = nn.Embedding(self.n_users, self.embedding_dim)
-        nn.init.xavier_uniform_(self.extended_text_user.weight)
+        self.latent_t_user = nn.Embedding(self.n_users, self.embedding_dim)
+        nn.init.xavier_uniform_(self.latent_t_user.weight)
 
         self.dataset_path = os.path.abspath(os.getcwd()+config['data_path'] + config['dataset'])
         self.data_name = config['dataset']
@@ -49,21 +49,21 @@ class USER(GeneralRecommender):
         text_adj_file = os.path.join(self.dataset_path, 'text_adj_{}_{}.pt'.format(self.knn_k, self.sparse))
 
         if self.v_feat is not None:
-            self.image_embedding = nn.Embedding.from_pretrained(self.v_feat, freeze=False)
+            self.v_embedding = nn.Embedding.from_pretrained(self.v_feat, freeze=False)
             if os.path.exists(image_adj_file):
                 image_adj = torch.load(image_adj_file)
             else:
-                image_adj = build_sim(self.image_embedding.weight.detach())
+                image_adj = build_sim(self.v_embedding.weight.detach())
                 image_adj = build_knn_normalized_graph(image_adj, topk=self.knn_k, is_sparse=self.sparse,norm_type='sym')
                 torch.save(image_adj, image_adj_file)
             self.image_original_adj = image_adj.cuda()
 
         if self.t_feat is not None:
-            self.text_embedding = nn.Embedding.from_pretrained(self.t_feat, freeze=False)
+            self.t_embedding = nn.Embedding.from_pretrained(self.t_feat, freeze=False)
             if os.path.exists(text_adj_file):
                 text_adj = torch.load(text_adj_file)
             else:
-                text_adj = build_sim(self.text_embedding.weight.detach())
+                text_adj = build_sim(self.t_embedding.weight.detach())
                 text_adj = build_knn_normalized_graph(text_adj, topk=self.knn_k, is_sparse=self.sparse, norm_type='sym')
                 torch.save(text_adj, text_adj_file)
             self.text_original_adj = text_adj.cuda()
@@ -81,7 +81,7 @@ class USER(GeneralRecommender):
             nn.Linear(self.embedding_dim, self.embedding_dim),
             nn.Sigmoid()
         )
-        self.image_space_trans = nn.Sequential(
+        self.v_mlp = nn.Sequential(
             self.image_reduce_dim,
             self.image_trans_dim
         )
@@ -91,7 +91,7 @@ class USER(GeneralRecommender):
             nn.Linear(self.embedding_dim, self.embedding_dim),
             nn.Sigmoid()
         )
-        self.text_space_trans = nn.Sequential(
+        self.t_mlp = nn.Sequential(
             self.text_reduce_dim,
             self.text_trans_dim
         )
@@ -195,7 +195,7 @@ class USER(GeneralRecommender):
         shape = torch.Size(sparse_mx.shape)
         return torch.sparse.FloatTensor(indices, values, shape)
     
-    def conv_ui(self, adj, user_embeds, item_embeds):
+    def ui_gcn(self, adj, user_embeds, item_embeds):
         ego_embeddings = torch.cat([user_embeds, item_embeds], dim=0)
         all_embeddings = [ego_embeddings]
         
@@ -208,41 +208,41 @@ class USER(GeneralRecommender):
         
         return all_embeddings
 
-    def conv_ii(self, ii_adj, single_modal):
+    def ii_gcn(self, ii_adj, single_modal):
         for i in range(self.n_layers):
             single_modal = torch.sparse.mm(ii_adj, single_modal)
         return single_modal
 
     def latent_preference_extract(self):
-        image_item_embeds = torch.multiply(self.item_id_embedding.weight, self.image_space_trans(self.image_embedding.weight))
-        text_item_embeds = torch.multiply(self.item_id_embedding.weight, self.text_space_trans(self.text_embedding.weight))
-        image_item = self.conv_ii(self.image_original_adj, image_item_embeds)
-        image_user = torch.sparse.mm(self.R, image_item)
-        image_embeds = torch.cat([image_user, image_item], dim=0)
+        v_item_embeds = torch.multiply(self.raw_item_embedding.weight, self.v_mlp(self.v_embedding.weight))
+        t_item_embeds = torch.multiply(self.raw_item_embedding.weight, self.t_mlp(self.t_embedding.weight))
+        v_item = self.ii_gcn(self.image_original_adj, v_item_embeds)
+        v_user = torch.sparse.mm(self.R, v_item)
+        latent_v_item_embeds = torch.cat([v_user, v_item], dim=0)
 
-        text_item = self.conv_ii(self.text_original_adj, text_item_embeds)
-        text_user = torch.sparse.mm(self.R, text_item)
-        text_embeds = torch.cat([text_user, text_item], dim=0) 
-        return image_item, text_item, image_embeds, text_embeds
+        t_item = self.ii_gcn(self.text_original_adj, t_item_embeds)
+        t_user = torch.sparse.mm(self.R, t_item)
+        latent_t_item_embeds = torch.cat([t_user, t_item], dim=0) 
+        return v_item, t_item, latent_v_item_embeds, latent_t_item_embeds
     
 
     def forward(self, co_adj, train=False):
 
         # Latent Preference Extraction
-        latent_image_item, latent_text_item, latent_image_item_embeds, latent_text_item_embeds = self.latent_preference_extract()
+        latent_v_item, latent_t_item, latent_v_item_embeds, latent_t_item_embeds = self.latent_preference_extract()
 
-        latent_image_ui_embeds = self.conv_ui(co_adj, self.extended_image_user.weight, latent_image_item)  
-        latent_text_ui_embeds = self.conv_ui(co_adj, self.extended_text_user.weight, latent_text_item) 
+        latent_v_ui_embeds = self.ui_gcn(co_adj, self.latent_v_user.weight, latent_v_item)  
+        latent_t_ui_embeds = self.ui_gcn(co_adj, self.latent_t_user.weight, latent_t_item) 
 
-        latent_embeds = (latent_image_ui_embeds + latent_text_ui_embeds) / 2
+        latent_embeds = (latent_v_ui_embeds + latent_t_ui_embeds) / 2
 
-        item_embeds = self.item_id_embedding.weight
+        item_embeds = self.raw_item_embedding.weight
         user_embeds = self.user_embedding.weight
-        co_ui_embeds = self.conv_ui(co_adj, user_embeds, item_embeds)   
+        co_ui_embeds = self.ui_gcn(co_adj, user_embeds, item_embeds)   
 
 
         # Fine-Grained Preference Encode
-        coarse_grained_embeds, fine_grained_image, fine_grained_text = self.fgpe.forward(latent_image_item_embeds, latent_text_item_embeds, co_ui_embeds)
+        coarse_grained_embeds, fine_grained_image, fine_grained_text = self.fgpe.forward(latent_v_item_embeds, latent_t_item_embeds, co_ui_embeds)
 
         # Modality-Aware Decode
         visual_token = self.visual_token_embedding(self.visual_token_index)
@@ -254,7 +254,7 @@ class USER(GeneralRecommender):
         all_embeds = co_ui_embeds + factors_enhancement_embeds
 
         if train:
-            return all_embeds, (factors_enhancement_embeds, co_ui_embeds, latent_embeds), (latent_image_item_embeds, latent_text_item_embeds)
+            return all_embeds, (factors_enhancement_embeds, co_ui_embeds, latent_embeds), (latent_v_item_embeds, latent_t_item_embeds)
 
         return all_embeds
     
@@ -302,10 +302,10 @@ class USER(GeneralRecommender):
         # BPR loss
         bpr_loss, reg_loss_1 = self.bpr_loss(u_copy, pos_i, neg_i)
 
+
         # IA loss
-        latent_image_item_embeds, latent_text_item_embeds = embeds_3
-        ia_loss = self.ia_loss * self.intra_align(latent_image_item_embeds, latent_text_item_embeds)
-        
+        latent_v_item_embeds, latent_t_item_embeds = embeds_3
+        ia_loss = self.ia_loss * self.intra_align(latent_v_item_embeds, latent_t_item_embeds)
         # EA loss
         enhancement_users, enhancement_items = torch.split(factors_enhancement_embeds, [self.n_users, self.n_items], dim=0)
         co_user, co_items = torch.split(co_ui_embeds, [self.n_users, self.n_items], dim=0)
@@ -317,9 +317,9 @@ class USER(GeneralRecommender):
         # MP loss
         latent_user, latent_items = torch.split(latent_embeds, [self.n_users, self.n_items], dim=0)
         c_loss = self.InfoNCE(latent_user[users], enhancement_users[users], self.mp_temp)
-        noise_loss_1 = self.cal_noise_loss(users, enhancement_users, self.mp_temp)
-        noise_loss_2 = self.cal_noise_loss(users, latent_user, self.mp_temp)
-        mp_loss = self.mp_loss * (c_loss + noise_loss_1 + noise_loss_2)
+        n1_loss = self.perturbation_contrastive_loss(users, enhancement_users, self.mp_temp)
+        n2_loss = self.perturbation_contrastive_loss(users, latent_user, self.mp_temp)
+        mp_loss = self.mp_loss * (c_loss + n1_loss + n2_loss)
         
         reg_loss_2 = self.reg_weight_2 * self.sq_sum(latent_items[pos_items]) / self.batch_size
         reg_loss = reg_loss_1 + reg_loss_2
@@ -328,7 +328,7 @@ class USER(GeneralRecommender):
     
 
     
-    def cal_noise_loss(self, id, emb, temp):
+    def perturbation_contrastive_loss(self, id, emb, temp):
 
         def add_perturbation(x):
             random_noise = torch.rand_like(x).to(self.device)
@@ -371,34 +371,27 @@ class FGPEncoder(nn.Module):
         )
         self.softmax = nn.Softmax(dim=-1)
 
-        self.image_behavior = nn.Sequential(
+        self.v_aware = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
             nn.Sigmoid()
         )
-        self.text_behavior = nn.Sequential(
+        self.t_aware = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
             nn.Sigmoid()
         )
 
-    def forward(self, image_embeds, text_embeds, co_ui_embeds):
-        image_weights, text_weights = torch.split(
-            self.softmax(
-                torch.cat([
-                    self.separate_coarse(image_embeds),
-                    self.separate_coarse(text_embeds)
-                ], dim=-1)
-            ),
-            1,
-            dim=-1
-        )
+    def forward(self, latent_v_item_embeds, latent_t_item_embeds, co_ui_embeds):
 
-        coarse_grained_embeds = (
-            image_weights * image_embeds +
-            text_weights * text_embeds
-        )
+        image_logits = self.separate_coarse(latent_v_item_embeds)
+        text_logits = self.separate_coarse(latent_t_item_embeds)
+        logits = torch.cat([image_logits, text_logits], dim=-1)
+        weights = self.softmax(logits)
+        image_weights, text_weights = torch.split(weights, 1, dim=-1)
 
-        fine_grained_image = torch.multiply(self.image_behavior(co_ui_embeds), (image_embeds - coarse_grained_embeds))
-        fine_grained_text = torch.multiply(self.text_behavior(co_ui_embeds), (text_embeds - coarse_grained_embeds))
+        coarse_grained_embeds = ( image_weights * latent_v_item_embeds + text_weights * latent_t_item_embeds )
+
+        fine_grained_image = torch.multiply(self.v_aware(co_ui_embeds), (latent_v_item_embeds - coarse_grained_embeds))
+        fine_grained_text = torch.multiply(self.t_aware(co_ui_embeds), (latent_t_item_embeds - coarse_grained_embeds))
 
         return coarse_grained_embeds, fine_grained_image, fine_grained_text
 
