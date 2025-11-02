@@ -27,5 +27,6 @@ Place the `codebook.pth` file into the `codebook` directory.
 
 
 ## Other Modality
+You can explore the generalization ability of our method across different modalities by replacing the visual or textual modality in the code with features from other modalities.
 
-
+For example, using the [MicroLens](https://drive.google.com/drive/folders/18MjrDgfUh-er6dQnHTTEPHDbe-djKr3p) dataset, we provide its codebook and tokens, which include textual, visual, and video modalities.
